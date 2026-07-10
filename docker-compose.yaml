@@ -37,6 +37,7 @@ services:
       --tensor-parallel-size ${SGLANG_TP_SIZE:-2}
       --context-length ${SGLANG_CONTEXT_LENGTH:-262144}
       --max-running-requests ${SGLANG_MAX_RUNNING_REQUESTS:-8}
+      --cuda-graph-max-bs ${SGLANG_CUDA_GRAPH_MAX_BS:-8}
       --mem-fraction-static ${SGLANG_MEM_FRACTION:-0.90}
       --served-model-name ${SGLANG_SERVED_MODEL_NAME:-qwen3.6-35b-a3b}
       --reasoning-parser ${SGLANG_REASONING_PARSER:-qwen3}
