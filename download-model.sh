@@ -6,7 +6,7 @@
 #
 # Uso:
 #   ./download-model.sh                              # usa SGLANG_MODEL_REPO + SGLANG_MODEL_PATH do .env
-#   ./download-model.sh QuantTrio/Qwen3.5-27B-AWQ /data/sglang/models/meu-modelo
+#   ./download-model.sh Qwen/Qwen3.6-27B-FP8 /data/models/meu-modelo
 #
 # HF_TOKEN: lido do .env ou do ambiente. Se vazio e o terminal for interativo,
 # o script pergunta (obter em https://huggingface.co/settings/tokens).
@@ -25,10 +25,10 @@ get_env() {
 }
 
 REPO_ID="${1:-$(get_env SGLANG_MODEL_REPO)}"
-REPO_ID="${REPO_ID:-QuantTrio/Qwen3.6-27B-AWQ}"
+REPO_ID="${REPO_ID:-Qwen/Qwen3.6-35B-A3B-FP8}"
 
 TARGET_DIR="${2:-$(get_env SGLANG_MODEL_PATH)}"
-TARGET_DIR="${TARGET_DIR:-/data/sglang/models/qwen3.6-27b-awq}"
+TARGET_DIR="${TARGET_DIR:-/data/models/qwen3.6-35b-a3b-fp8}"
 
 HF_TOKEN="${HF_TOKEN:-$(get_env HF_TOKEN)}"
 

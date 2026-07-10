@@ -20,6 +20,6 @@ docker compose up --build --force-recreate --remove-orphans --wait
 docker image prune -af
 
 # filtro: não apagar volumes órfãos de outras stacks do host
-docker volume prune -f --filter label=com.docker.compose.project=ollama
+docker volume prune -f --filter label=com.docker.compose.project=llm
 
 docker builder prune -f

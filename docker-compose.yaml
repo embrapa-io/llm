@@ -1,11 +1,8 @@
 services:
+  # Engine padrão — nos L40S (Ada, sm_89) o SGLang roda pleno: FP8 nativo,
+  # multimodal (vision encoder com kernels fused), GDN, CUDA graphs e
+  # FlashAttention. Nenhum dos workarounds de Turing do server GTI se aplica.
   sglang:
-    # Mantido sob profile como referência/rollback — em Turing o SGLang atual
-    # só roda text-only (vision encoder sem cubins sm_75; ver README).
-    # Subir com: docker compose stop vllm && docker compose --profile sglang up -d sglang
-    profiles: [sglang]
-    # v0.5.14 (jun/2026) traz os backends modulares de atenção linear
-    # (--linear-attn-backend triton), necessários para Qwen3.5/3.6 em Turing.
     # Build local em cima da -runtime para repor deps Python faltantes
     # (sgl-project/sglang#29650) — ver Dockerfile.sglang.
     build:
@@ -20,7 +17,7 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
-    shm_size: 16gb
+    shm_size: 32gb
     ipc: host
     environment:
       - NVIDIA_VISIBLE_DEVICES=${SGLANG_NVIDIA_VISIBLE_DEVICES:-all}
@@ -35,25 +32,23 @@ services:
       --host 0.0.0.0
       --port 30000
       --tensor-parallel-size ${SGLANG_TP_SIZE:-2}
-      --context-length ${SGLANG_CONTEXT_LENGTH:-65536}
-      --max-running-requests ${SGLANG_MAX_RUNNING_REQUESTS:-6}
+      --context-length ${SGLANG_CONTEXT_LENGTH:-524288}
+      --max-running-requests ${SGLANG_MAX_RUNNING_REQUESTS:-8}
       --mem-fraction-static ${SGLANG_MEM_FRACTION:-0.90}
-      --cpu-offload-gb ${SGLANG_CPU_OFFLOAD_GB:-0}
-      --quantization ${SGLANG_QUANTIZATION:-awq}
-      --served-model-name ${SGLANG_SERVED_MODEL_NAME:-qwen3.6-27b-awq}
+      --served-model-name ${SGLANG_SERVED_MODEL_NAME:-qwen3.6-35b-a3b}
       --reasoning-parser ${SGLANG_REASONING_PARSER:-qwen3}
       --tool-call-parser ${SGLANG_TOOL_CALL_PARSER:-qwen3_coder}
       --schedule-policy lpm
       --enable-mixed-chunk
+      --trust-remote-code
       ${SGLANG_EXTRA_ARGS:-}
     restart: unless-stopped
 
-  # Engine padrão — validado em Turing em 03/jul/2026: texto (GDN), VISÃO e
-  # tool calling. O vLLM mantém suporte ativo a sm_75 (ex. vllm#44403) e o
-  # vision encoder usa ops torch/SDPA, não os kernels fused que o sgl-kernel
-  # deixou de compilar para Turing. Usa a mesma porta do sglang (profile) —
-  # os dois não podem rodar juntos.
+  # Rollback/alternativa — validado na GTI (03/jul/2026) com Qwen3.6. Usa a
+  # mesma porta do sglang — os dois não podem rodar juntos.
+  # Subir com: docker compose stop sglang && docker compose --profile vllm up -d vllm
   vllm:
+    profiles: [vllm]
     image: vllm/vllm-openai:v0.24.0-ubuntu2404
     runtime: nvidia
     deploy:
@@ -63,15 +58,11 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
-    shm_size: 16gb
+    shm_size: 32gb
     ipc: host
     environment:
       - NVIDIA_VISIBLE_DEVICES=${SGLANG_NVIDIA_VISIBLE_DEVICES:-all}
       - VLLM_SLEEP_WHEN_IDLE=1
-      - VLLM_USE_FLASHINFER_SAMPLER=0
-      # Turing: força triton nas camadas full-attention — a auto-seleção em
-      # sm_75 ainda tem arestas (vllm#44403).
-      - VLLM_ATTENTION_BACKEND=${VLLM_ATTENTION_BACKEND:-TRITON_ATTN}
     volumes:
       - ${SGLANG_MODEL_PATH:?defina no .env (cp .env.example .env)}:/model:ro
       - vllm-cache:/root/.cache
@@ -79,23 +70,22 @@ services:
       - ${PORT_SGLANG:-11435}:8000
     # A imagem já traz ENTRYPOINT que invoca o servidor — fixamos explícito e
     # o command carrega SÓ os argumentos (repetir "vllm serve" duplica a
-    # invocação). --swap-space foi removido no engine V1 (v0.24).
+    # invocação). Quantização FP8 é auto-detectada do config.json do modelo.
     entrypoint: ["vllm", "serve"]
     command: >
       /model
       --host 0.0.0.0
       --port 8000
-      --served-model-name ${SGLANG_SERVED_MODEL_NAME:-qwen3.6-27b-awq}
+      --served-model-name ${SGLANG_SERVED_MODEL_NAME:-qwen3.6-35b-a3b}
       --tensor-parallel-size ${SGLANG_TP_SIZE:-2}
-      --max-model-len ${SGLANG_CONTEXT_LENGTH:-131072}
-      --max-num-seqs ${SGLANG_MAX_RUNNING_REQUESTS:-6}
+      --max-model-len ${SGLANG_CONTEXT_LENGTH:-524288}
+      --max-num-seqs ${SGLANG_MAX_RUNNING_REQUESTS:-8}
       --gpu-memory-utilization ${SGLANG_MEM_FRACTION:-0.90}
-      --dtype float16
-      --quantization awq
       --reasoning-parser qwen3
       --tool-call-parser qwen3_coder
       --enable-auto-tool-choice
       --trust-remote-code
+      ${VLLM_EXTRA_ARGS:-}
     restart: unless-stopped
 
   ollama:
@@ -104,7 +94,8 @@ services:
       # Força execução em CPU (embeddings). GPUs ficam dedicadas ao SGLang.
       - CUDA_VISIBLE_DEVICES=
       - NVIDIA_VISIBLE_DEVICES=
-      # Performance em CPU (Xeon Gold 6254 / AVX-512, 72 threads)
+      # Performance em CPU (2× Xeon 6730P Granite Rapids — 64 cores/128
+      # threads, AMX acelera GEMM INT8/BF16 no llama.cpp)
       - OLLAMA_CONTEXT_LENGTH=${OLLAMA_CONTEXT_LENGTH:-16384}
       - OLLAMA_FLASH_ATTENTION=${OLLAMA_FLASH_ATTENTION:-1}
       - OLLAMA_NEW_ENGINE=${OLLAMA_NEW_ENGINE:-1}
@@ -112,8 +103,8 @@ services:
       - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS:-4}
       - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-24h}
       - OLLAMA_HOST=0.0.0.0:11434
-      # Tuning OpenMP (AVX-512 / NUMA dual-socket)
-      - OMP_NUM_THREADS=${OMP_NUM_THREADS:-16}
+      # Tuning OpenMP (AMX / NUMA dual-socket)
+      - OMP_NUM_THREADS=${OMP_NUM_THREADS:-32}
       - OMP_PROC_BIND=${OMP_PROC_BIND:-close}
       - OMP_PLACES=${OMP_PLACES:-cores}
     volumes:
@@ -139,6 +130,5 @@ volumes:
 
 networks:
   default:
-    name: ollama
+    name: llm
     external: true
-

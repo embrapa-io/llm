@@ -5,8 +5,9 @@
 # Remover este Dockerfile (e voltar a usar a imagem direto no compose) quando
 # o upstream publicar uma -runtime corrigida.
 #
-# Imagem default (CUDA 13.0): o host (Ubuntu 24.04) roda o driver R580 —
-# último ramo com suporte a Turing — que atende o requisito de CUDA 13.
+# Imagem default (CUDA 13.0): o host (Ubuntu 26.04, driver R595) atende o
+# requisito de CUDA 13 com folga. L40S (Ada, sm_89): suporte pleno do
+# sgl-kernel — FP8, multimodal, CUDA graphs, FlashAttention.
 FROM lmsysorg/sglang:v0.5.14-runtime
 
 RUN python3 -m pip install --no-cache-dir --ignore-installed \
