@@ -2,9 +2,11 @@
 
 Stack de inferência LLM dos dois GPU servers "gêmeos" do Data Center da Sede,
 derivada de [embrapa-io/ollama](https://github.com/embrapa-io/ollama) (GPU
-Server da GTI). Enquanto o server da GTI (Turing, sm_75) exige vLLM e
-workarounds, aqui os **L40S (Ada, sm_89)** permitem a stack plena:
-**SGLang + FP8 nativo + multimodal + contexto longo (512K–1M)**.
+Server da GTI). Os **L40S (Ada, sm_89)** rodam **FP8 nativo + multimodal +
+contexto longo** sem os workarounds de kernel do Turing. Engine padrão:
+**vLLM** (TP=2). O SGLang fica sob profile: em 10/07/2026 o boot travava no
+primeiro coletivo do TP=2 (GPUs em sockets distintos, topologia `SYS` sem
+P2P) — retestar com `NCCL_P2P_DISABLE=1` antes de descartar.
 
 | | |
 |---|---|
@@ -31,17 +33,24 @@ distinção produção/desenvolvimento é só de uso e clientela.
 ```
 hp-gpu0X (256 GB RAM, 2× Xeon 6730P)
 ├── GPU 0 (L40S 48 GB) ──┐
-│                         ├── SGLang TP=2: Qwen3.6-35B-A3B-FP8
-├── GPU 1 (L40S 48 GB) ──┘   multimodal (texto+imagem), 512K de contexto
-│                             (YaRN ×2; 1M possível com YaRN ×4)
+│                         ├── vLLM TP=2: Qwen3.6-35B-A3B-FP8
+├── GPU 1 (L40S 48 GB) ──┘   multimodal (texto+imagem), 262K nativo
+│                             (KV p/ 2,17M tokens ≈ 8,3× 262K cheios;
+│                              512K/1M via YaRN a validar)
 │
 └── CPU (AMX) ──── Ollama: embeddings (bge-m3, qwen3-embedding, ...)
 
 nginx (porta 11434 — URL única para os clientes):
-  /v1/*  → SGLang :30000 (OpenAI-compatible: chat, visão, tools)
+  /v1/*  → vLLM :8000 (OpenAI-compatible: chat, visão, tools)
   /api/* → Ollama :11434 (API nativa: embeddings)
-porta 11435 → SGLang direto (diagnóstico)
+porta 11435 → engine direto (diagnóstico)
 ```
+
+⚠️ **Topologia crítica**: cada L40S pende de um socket (domínios PCI
+`0000`/`0001`, NUMA 0/1, interligação `SYS`, sem NVLink/P2P). Todo engine
+com TP=2 precisa de `NCCL_P2P_DISABLE=1` e all-reduce custom desabilitado —
+sem isso o primeiro coletivo trava com GPU a 100% até o watchdog matar o
+processo (diagnóstico de 10/07/2026, idêntico em SGLang e vLLM).
 
 ## Modelo servido nas GPUs
 
@@ -85,11 +94,11 @@ docker network create llm
 
 # 5. Subir
 docker compose up -d --build
-docker compose logs -f sglang   # 1º boot: compilação/warmup demora
+docker compose logs -f vllm     # boot ~100 s (medido em 10/07/2026)
 ```
 
-No boot do SGLang, anotar `max_total_num_tokens` (capacidade real de KV) e
-validar a relação contexto × slots (`SGLANG_MAX_RUNNING_REQUESTS` no `.env`).
+No boot do vLLM, anotar `GPU KV cache size` (tokens) e `Maximum concurrency`
+— em 10/07/2026: **2.168.929 tokens** e **8,27×** com requests de 262K.
 
 ## Endpoints
 
@@ -97,11 +106,12 @@ validar a relação contexto × slots (`SGLANG_MAX_RUNNING_REQUESTS` no `.env`).
 |---|---|
 | Chat/visão/tools (OpenAI-compatible) | `http://hp-gpu0X.nuvem.ti.embrapa.br:11434/v1` |
 | Embeddings (API nativa Ollama) | `http://hp-gpu0X.nuvem.ti.embrapa.br:11434/api/embed` |
-| SGLang direto (diagnóstico) | `http://hp-gpu0X.nuvem.ti.embrapa.br:11435/v1` |
+| Engine direto (diagnóstico) | `http://hp-gpu0X.nuvem.ti.embrapa.br:11435/v1` |
 
 - Clientes OpenAI usam key dummy (ex.: `sk-local`).
 - Thinking: enviar `"chat_template_kwargs": {"enable_thinking": true|false}`
-  por request; o raciocínio volta em `reasoning_content` (SGLang).
+  por request; no vLLM o raciocínio volta no campo `reasoning` (no SGLang
+  seria `reasoning_content`) — mesmo comportamento do server da GTI.
 - Endpoints de administração do Ollama (`/api/pull`, `/api/delete`, ...) são
   bloqueados no nginx (403) — usar `docker compose exec ollama ollama pull ...`.
 
@@ -125,17 +135,20 @@ docker compose exec ollama ollama pull granite-embedding:278m
 docker compose logs -f sglang    # logs do engine
 ```
 
-### Rollback para vLLM
+### Teste do SGLang (profile)
 
-O serviço `vllm` fica sob profile (mesma porta do SGLang — não rodam juntos):
+O serviço `sglang` fica sob profile (mesma porta do vLLM — não rodam juntos).
+Antes de testar, garantir `NCCL_P2P_DISABLE=1` (já default no compose) e
+trocar o upstream do nginx para `sglang:30000`:
 
 ```bash
-docker compose stop sglang
-docker compose --profile vllm up -d vllm
+docker compose stop vllm
+docker compose --profile sglang up -d sglang
 ```
 
-No vLLM o raciocínio volta no campo `reasoning` (não `reasoning_content`) e o
-YaRN é configurado via `--hf-overrides` (ver `VLLM_EXTRA_ARGS` no compose).
+No vLLM o YaRN para >262K é configurado via `--hf-overrides` (usar
+`VLLM_EXTRA_ARGS`); no SGLang, via `--json-model-override-args` +
+`SGLANG_ALLOW_OVERWRITE_LONGER_CONTEXT_LEN=1` (ver `.env.example`).
 
 ## Validação de contexto longo
 
