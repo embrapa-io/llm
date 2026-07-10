@@ -129,6 +129,10 @@ services:
   nginx:
     image: nginx:latest
     ports:
+      # Porta padrão dos clientes — sem TLS por decisão arquitetural (intranet
+      # do DC; ata GTI 03/07/2026). Terminação TLS futura fica no Kong.
+      - ${PORT_HTTP:-80}:11434
+      # Compatibilidade com o padrão do server da GTI durante a transição.
       - ${PORT_OLLAMA:-11434}:11434
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro

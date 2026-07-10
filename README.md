@@ -104,9 +104,13 @@ No boot do vLLM, anotar `GPU KV cache size` (tokens) e `Maximum concurrency`
 
 | Uso | URL |
 |---|---|
-| Chat/visão/tools (OpenAI-compatible) | `http://hp-gpu0X.nuvem.ti.embrapa.br:11434/v1` |
-| Embeddings (API nativa Ollama) | `http://hp-gpu0X.nuvem.ti.embrapa.br:11434/api/embed` |
+| Chat/visão/tools (OpenAI-compatible) | `http://hp-gpu0X.nuvem.ti.embrapa.br/v1` |
+| Embeddings (API nativa Ollama) | `http://hp-gpu0X.nuvem.ti.embrapa.br/api/embed` |
 | Engine direto (diagnóstico) | `http://hp-gpu0X.nuvem.ti.embrapa.br:11435/v1` |
+
+A porta 80 é o padrão (URL sem porta, HTTP puro — intranet do DC, sem TLS
+por decisão da ata GTI de 03/07/2026; terminação TLS futura fica no Kong).
+A 11434 segue mapeada por compatibilidade com o padrão do server da GTI.
 
 - Clientes OpenAI usam key dummy (ex.: `sk-local`).
 - Thinking: enviar `"chat_template_kwargs": {"enable_thinking": true|false}`
