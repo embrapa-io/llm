@@ -21,6 +21,9 @@ services:
     ipc: host
     environment:
       - NVIDIA_VISIBLE_DEVICES=${SGLANG_NVIDIA_VISIBLE_DEVICES:-all}
+      # Exigido pelo SGLang para servir contexto acima do derivado do modelo
+      # (262K no Qwen3.6) — usar junto com o override YaRN do .env.
+      - SGLANG_ALLOW_OVERWRITE_LONGER_CONTEXT_LEN=${SGLANG_ALLOW_OVERWRITE_LONGER_CONTEXT_LEN:-0}
     volumes:
       - ${SGLANG_MODEL_PATH:?defina no .env (cp .env.example .env)}:/model:ro
       - sglang-cache:/root/.cache
@@ -32,7 +35,7 @@ services:
       --host 0.0.0.0
       --port 30000
       --tensor-parallel-size ${SGLANG_TP_SIZE:-2}
-      --context-length ${SGLANG_CONTEXT_LENGTH:-524288}
+      --context-length ${SGLANG_CONTEXT_LENGTH:-262144}
       --max-running-requests ${SGLANG_MAX_RUNNING_REQUESTS:-8}
       --mem-fraction-static ${SGLANG_MEM_FRACTION:-0.90}
       --served-model-name ${SGLANG_SERVED_MODEL_NAME:-qwen3.6-35b-a3b}
@@ -78,7 +81,7 @@ services:
       --port 8000
       --served-model-name ${SGLANG_SERVED_MODEL_NAME:-qwen3.6-35b-a3b}
       --tensor-parallel-size ${SGLANG_TP_SIZE:-2}
-      --max-model-len ${SGLANG_CONTEXT_LENGTH:-524288}
+      --max-model-len ${SGLANG_CONTEXT_LENGTH:-262144}
       --max-num-seqs ${SGLANG_MAX_RUNNING_REQUESTS:-8}
       --gpu-memory-utilization ${SGLANG_MEM_FRACTION:-0.90}
       --reasoning-parser qwen3
