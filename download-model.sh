@@ -18,10 +18,12 @@ cd "$SCRIPT_DIR"
 
 # Extrai um único valor do .env sem `source` (vars podem conter espaços e
 # tokens como `--flag`, que o bash tentaria executar como comando).
+# O `|| true` protege do pipefail: chave ausente/comentada faz o grep retornar
+# 1, o que sob `set -euo pipefail` mataria o script silenciosamente.
 get_env() {
   local key="$1"
   [[ -f .env ]] || return 0
-  grep -E "^${key}=" .env | tail -1 | sed -E "s/^${key}=//; s/^[\"'](.*)[\"']\$/\\1/"
+  { grep -E "^${key}=" .env || true; } | tail -1 | sed -E "s/^${key}=//; s/^[\"'](.*)[\"']\$/\\1/"
 }
 
 REPO_ID="${1:-$(get_env SGLANG_MODEL_REPO)}"
