@@ -1,8 +1,11 @@
 services:
-  # Engine padrão — nos L40S (Ada, sm_89) o SGLang roda pleno: FP8 nativo,
-  # multimodal (vision encoder com kernels fused), GDN, CUDA graphs e
-  # FlashAttention. Nenhum dos workarounds de Turing do server GTI se aplica.
+  # Sob profile desde 10/07/2026: o boot travava com GPU a 100% até o timeout
+  # de 600s do warmup. Causa provável IDÊNTICA à do vLLM (all-reduce custom
+  # com GPUs em sockets/domínios PCI distintos — topologia SYS, sem P2P);
+  # retestar no hp-gpu02 com NCCL_P2P_DISABLE=1 antes de descartar.
+  # Subir com: docker compose stop vllm && docker compose --profile sglang up -d sglang
   sglang:
+    profiles: [sglang]
     # Build local em cima da -runtime para repor deps Python faltantes
     # (sgl-project/sglang#29650) — ver Dockerfile.sglang.
     build:
@@ -21,6 +24,9 @@ services:
     ipc: host
     environment:
       - NVIDIA_VISIBLE_DEVICES=${SGLANG_NVIDIA_VISIBLE_DEVICES:-all}
+      # GPUs em sockets distintos (topologia SYS, sem P2P) — P2P "aparente"
+      # trava o primeiro coletivo do TP=2 com GPU a 100%.
+      - NCCL_P2P_DISABLE=${NCCL_P2P_DISABLE:-1}
       # Exigido pelo SGLang para servir contexto acima do derivado do modelo
       # (262K no Qwen3.6) — usar junto com o override YaRN do .env.
       - SGLANG_ALLOW_OVERWRITE_LONGER_CONTEXT_LEN=${SGLANG_ALLOW_OVERWRITE_LONGER_CONTEXT_LEN:-0}
@@ -48,11 +54,9 @@ services:
       ${SGLANG_EXTRA_ARGS:-}
     restart: unless-stopped
 
-  # Rollback/alternativa — validado na GTI (03/jul/2026) com Qwen3.6. Usa a
-  # mesma porta do sglang — os dois não podem rodar juntos.
-  # Subir com: docker compose stop sglang && docker compose --profile vllm up -d vllm
+  # Engine padrão desde 10/07/2026 — validado na GTI (03/jul) com Qwen3.6.
+  # Usa a mesma porta do sglang (profile) — os dois não podem rodar juntos.
   vllm:
-    profiles: [vllm]
     image: vllm/vllm-openai:v0.24.0-ubuntu2404
     runtime: nvidia
     deploy:
@@ -67,6 +71,9 @@ services:
     environment:
       - NVIDIA_VISIBLE_DEVICES=${SGLANG_NVIDIA_VISIBLE_DEVICES:-all}
       - VLLM_SLEEP_WHEN_IDLE=1
+      # GPUs em sockets distintos (topologia SYS, sem P2P): sem isso o NCCL
+      # tenta P2P "aparente" e o boot trava no 1º coletivo (10/07/2026).
+      - NCCL_P2P_DISABLE=${NCCL_P2P_DISABLE:-1}
     volumes:
       - ${SGLANG_MODEL_PATH:?defina no .env (cp .env.example .env)}:/model:ro
       - vllm-cache:/root/.cache
@@ -88,6 +95,7 @@ services:
       --reasoning-parser qwen3
       --tool-call-parser qwen3_coder
       --enable-auto-tool-choice
+      --disable-custom-all-reduce
       --trust-remote-code
       ${VLLM_EXTRA_ARGS:-}
     restart: unless-stopped
